@@ -1,0 +1,35 @@
+{
+    "message_type": "json",
+    "patient": {
+      "id": "123456",
+      "name": [
+        {
+          "given": ["Jane"],
+          "family": "Doe"
+        }
+      ],
+      "gender": "female",
+      "birth_date": "1985-03-15"
+    },
+    "provider": {
+      "id": "PROV001",
+      "name": "Dr. Emily Carter",
+      "department": "Radiology"
+    },
+    "study": {
+      "date": "2025-05-12",
+      "accession_number": "ACC20250512001",
+      "modality": "MG",
+      "procedure_code": {
+        "code": "24606-6",
+        "system": "http://loinc.org",
+        "display": "Mammogram Diagnostic Report"
+      }
+    },
+    "findings": [
+      "Suspicious mass in right breast, upper outer quadrant.",
+      "Left breast tissue appears normal.",
+      "BI-RADS 4: Suspicious abnormality. Consider biopsy."
+    ]
+  }
+  
