@@ -49,7 +49,45 @@ It enables smooth integration of imaging workflows with EHR/EMR systems in compl
 
 ---
 
-## 🔧 3. API Documentation
+## 📂 3. Code Structure and Logic
+
+### dicom_to_fhir.py
+
+This module provides functions to convert DICOM Structured Report (SR) files into FHIR R4 DiagnosticReport bundles. Key functions include:
+
+- `generate_uuid()`: Generates UUIDs for FHIR resources.
+- `format_dicom_date(date_str)`: Converts DICOM date strings to FHIR-compliant date format.
+- `extract_patient_info(ds)`: Extracts patient demographics and identifiers from the DICOM dataset.
+- `extract_observations(ds, patient_ref)`: Recursively extracts observations from the DICOM SR ContentSequence.
+- `create_diagnostic_report(patient_ref, observations, ds)`: Creates a FHIR DiagnosticReport resource linking patient and observations.
+- `dicom_to_fhir(dicom_path)`: Main function that reads a DICOM file and returns a FHIR message dictionary.
+
+### dicom_to_json.py
+
+This module extracts patient, study, provider, and findings information from DICOM SR files and generates a custom JSON message. Key functions include:
+
+- `extract_custom_patient_info(ds)`: Extracts patient information for JSON output.
+- `extract_study_info(ds)`: Extracts study details including procedure codes.
+- `extract_provider_info(ds)`: Extracts referring provider information.
+- `extract_findings(ds)`: Recursively extracts textual findings from the DICOM ContentSequence.
+- `generate_custom_json(dicom_path)`: Main function to generate the custom JSON message.
+
+### DICOMSR_HL7_FHIR_Writer_Swagger.py
+
+This is the main Flask API service that provides the `/generate-message` endpoint. It supports generating HL7, FHIR, or JSON messages from uploaded DICOM SR or JSON files. Features include:
+
+- HL7 special character escaping.
+- Parsing mammogram SR DICOM files.
+- Building HL7 ORU^R01 messages.
+- Building FHIR DiagnosticReport resources.
+- Swagger UI integration for API documentation.
+- Helper functions for DICOM value extraction and formatting.
+- HL7 message generation from DICOM SR.
+- Flask app run configuration.
+
+---
+
+## 🔧 4. API Documentation
 
 ### Endpoint
 
@@ -75,7 +113,7 @@ It enables smooth integration of imaging workflows with EHR/EMR systems in compl
 
 ---
 
-## 📜 4. HL7 and FHIR Compliance
+## 📜 5. HL7 and FHIR Compliance
 
 ### HL7 v2.3 ORU^R01
 
@@ -99,7 +137,7 @@ It enables smooth integration of imaging workflows with EHR/EMR systems in compl
 
 ---
 
-## 🛠️ 5. Installation & Deployment
+## 🛠️ 6. Installation & Deployment
 
 ### Prerequisites
 
@@ -115,7 +153,7 @@ pip install flask flasgger pydicom
 ### Run Server
 
 ```bash
-python HL7_FHIRWriter_Swagger.py
+python DICOMSR_HL7_FHIR_Writer_Swagger.py
 ```
 
 Swagger UI:
@@ -123,7 +161,7 @@ Swagger UI:
 
 ---
 
-## 🧪 6. Testing & Validation
+## 🧪 7. Testing & Validation
 
 ### ✅ Example Curl Request
 
@@ -153,15 +191,17 @@ Use:
 
 ---
 
-## 🤝 7. Development & Contribution
+## 🤝 8. Development & Contribution
 
 ### File Structure
 
 ```plaintext
-├── HL7_FHIRWriter_Swagger.py      # Main Flask app
-├── sample_mammogram_sr.dcm        # DICOM SR sample
-├── Input_Message.json             # JSON test input
-├── README.md                      # Project documentation
+├── DICOMSR_HL7_FHIR_Writer_Swagger.py  # Main Flask app
+├── dicom_to_fhir.py                     # DICOM to FHIR conversion module
+├── dicom_to_json.py                     # DICOM to custom JSON conversion module
+├── README.md                           # Project documentation
+├── brayz_sr.dcm                       # Sample DICOM SR file
+├── Input_Message.json                 # Sample JSON input
 ```
 
 ### Contribution Guide
@@ -173,13 +213,13 @@ Use:
 
 ---
 
-## ⚖️ 8. License
+## ⚖️ 9. License
 
 This project is licensed under the **MIT License**. You are free to use, modify, and distribute.
 
 ---
 
-## 📚 9. Appendix
+## 📚 10. Appendix
 
 ### 📁 Sample JSON Input
 
@@ -213,4 +253,3 @@ This project is licensed under the **MIT License**. You are free to use, modify,
     "BI-RADS 4: Suspicious abnormality. Consider biopsy."
   ]
 }
-
