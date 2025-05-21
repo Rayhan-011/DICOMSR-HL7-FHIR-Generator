@@ -1,4 +1,4 @@
-# 🩻 Mammogram SR HL7 and FHIR Message Generator
+# 🩻 Mammogram DICOM SR HL7 and FHIR Message Generator
 
 *A Python-based service to extract clinical findings from mammogram DICOM SR files and generate standardized HL7 and FHIR messages*
 
