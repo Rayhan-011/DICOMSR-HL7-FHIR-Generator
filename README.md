@@ -1,4 +1,4 @@
-# 🩻 Mammogram DICOM SR HL7 and FHIR Message Generator
+# 🩻 Mammogram SR HL7 and FHIR Message Generator
 
 *A Python-based service to extract clinical findings from mammogram DICOM SR files and generate standardized HL7 and FHIR messages*
 
@@ -62,6 +62,15 @@ This module provides functions to convert DICOM Structured Report (SR) files int
 - `create_diagnostic_report(patient_ref, observations, ds)`: Creates a FHIR DiagnosticReport resource linking patient and observations.
 - `dicom_to_fhir(dicom_path)`: Main function that reads a DICOM file and returns a FHIR message dictionary.
 
+**Example usage:**
+
+```python
+from dicom_to_fhir import dicom_to_fhir
+
+fhir_message = dicom_to_fhir("path/to/dicom_file.dcm")
+print(fhir_message)
+```
+
 ### dicom_to_json.py
 
 This module extracts patient, study, provider, and findings information from DICOM SR files and generates a custom JSON message. Key functions include:
@@ -71,6 +80,15 @@ This module extracts patient, study, provider, and findings information from DIC
 - `extract_provider_info(ds)`: Extracts referring provider information.
 - `extract_findings(ds)`: Recursively extracts textual findings from the DICOM ContentSequence.
 - `generate_custom_json(dicom_path)`: Main function to generate the custom JSON message.
+
+**Example usage:**
+
+```python
+from dicom_to_json import generate_custom_json
+
+custom_json = generate_custom_json("path/to/dicom_file.dcm")
+print(custom_json)
+```
 
 ### DICOMSR_HL7_FHIR_Writer_Swagger.py
 
@@ -84,6 +102,15 @@ This is the main Flask API service that provides the `/generate-message` endpoin
 - Helper functions for DICOM value extraction and formatting.
 - HL7 message generation from DICOM SR.
 - Flask app run configuration.
+
+**API Endpoint Usage Example:**
+
+```bash
+curl -X POST http://localhost:5000/generate-message \
+  -F "message_type=fhir" \
+  -F "file=@path/to/dicom_file.dcm"
+```
+
 
 ---
 

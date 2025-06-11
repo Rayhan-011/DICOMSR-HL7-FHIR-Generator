@@ -30,6 +30,41 @@ def format_dicom_date(date_str: str) -> str:
     except Exception:
         return ""
 
+
+def generate_narrative(resource_type: str, resource_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generate a basic narrative for FHIR resources.
+
+    Args:
+        resource_type (str): The type of FHIR resource.
+        resource_data (Dict[str, Any]): The resource data.
+
+    Returns:
+        Dict[str, Any]: The text field for the resource.
+    """
+    if resource_type == "Patient":
+        name = " ".join(resource_data["name"][0].get("given", [])) + " " + resource_data["name"][0].get("family", "")
+        return {
+            "status": "generated",
+            "div": f"<div xmlns=\"http://www.w3.org/1999/xhtml\">Patient: {name.strip()} (ID: {resource_data['identifier'][0]['value']})</div>"
+        }
+    elif resource_type == "Observation":
+        value = resource_data.get("valueString", "No value")
+        code = resource_data["code"]["coding"][0]["display"]
+        return {
+            "status": "generated",
+            "div": f"<div xmlns=\"http://www.w3.org/1999/xhtml\">Observation: {code} - {value}</div>"
+        }
+    elif resource_type == "DiagnosticReport":
+        return {
+            "status": "generated",
+            "div": f"<div xmlns=\"http://www.w3.org/1999/xhtml\">Diagnostic Report: {resource_data['code']['coding'][0]['display']}</div>"
+        }
+    return {
+        "status": "generated",
+        "div": f"<div xmlns=\"http://www.w3.org/1999/xhtml\">{resource_type} Resource</div>"
+    }
+
 def extract_patient_info(ds: pydicom.Dataset) -> Dict[str, Any]:
     """
     Extract comprehensive patient information from a DICOM dataset.
@@ -49,11 +84,11 @@ def extract_patient_info(ds: pydicom.Dataset) -> Dict[str, Any]:
     given_names = name_parts[1:] if len(name_parts) > 1 else []
     
     # Get additional patient demographics
-    birth_date = str(ds.get('PatientBirthDate', '0000-01-01'))
-    if '-' in birth_date:
-        pass
-    else:
-        birth_date = f"{birth_date[:4]}-{birth_date[4:6]}-{birth_date[6:8]}"
+    raw_birth_date = str(ds.get('PatientBirthDate', '')).strip()
+    birth_date = ""
+    if raw_birth_date and len(raw_birth_date) == 8 and raw_birth_date.isdigit():
+        birth_date = f"{raw_birth_date[:4]}-{raw_birth_date[4:6]}-{raw_birth_date[6:8]}"
+
     gender = str(ds.get('PatientSex', 'unknown')).lower()
 
     if gender.lower() == 'm':
@@ -62,8 +97,8 @@ def extract_patient_info(ds: pydicom.Dataset) -> Dict[str, Any]:
         gender = 'female'
     else:
         gender = 'other'
-    
-    return {
+
+    patient_resource = {
         "resourceType": "Patient",
         "id": generate_uuid(),
         "identifier": [
@@ -72,17 +107,22 @@ def extract_patient_info(ds: pydicom.Dataset) -> Dict[str, Any]:
                 "value": patient_id
             }
         ],
-
         "name": [
             {
                 "family": family_name,
                 "given": given_names
             }
         ],
-
-        "gender": gender,
-        "birthDate": birth_date
+        "gender": gender
     }
+
+    if birth_date:
+        patient_resource["birthDate"] = birth_date
+
+    # Add narrative text
+    patient_resource["text"] = generate_narrative("Patient", patient_resource)
+
+    return patient_resource
 
 def extract_observations(ds: pydicom.Dataset, patient_ref: str) -> List[Dict[str, Any]]:
     """
@@ -116,13 +156,13 @@ def extract_observations(ds: pydicom.Dataset, patient_ref: str) -> List[Dict[str
             if hasattr(item, 'TextValue'):
                 observation = {
                     "resourceType": "Observation",
-                    "id": f"obs-{len(observations) + 1}",
+                    "id": generate_uuid(),
                     "status": "final",
                     "code": {
                         "coding": [
                             code or {
                                 "code": "24606-6",
-                                "display": "Mammogram observation",
+                                "display": "MG Breast Screening",
                                 "system": "http://loinc.org"
                             }
                         ]
@@ -130,12 +170,32 @@ def extract_observations(ds: pydicom.Dataset, patient_ref: str) -> List[Dict[str
                     "subject": {
                         "reference": f"Patient/{patient_ref}"
                     },
-                    "valueString": str(item.TextValue)
+                    "valueString": str(item.TextValue),
+                    "performer": [
+                        {
+                            "display": "Radiologist System"
+                        }
+                    ]
                 }
+
+                # Add narrative text
+                observation["text"] = generate_narrative("Observation", observation)
                 
                 # Add additional metadata if available
-                if hasattr(item, 'ObservationDateTime'):
-                    observation["effectiveDateTime"] = str(item.ObservationDateTime)
+                if hasattr(item, 'ObservationDateTime') and item.ObservationDateTime:
+                    obs_datetime = str(item.ObservationDateTime).strip()
+                    if len(obs_datetime) == 14 and obs_datetime.isdigit():
+                        # Format: YYYYMMDDHHMMSS → YYYY-MM-DDTHH:MM:SSZ
+                        formatted = f"{obs_datetime[:4]}-{obs_datetime[4:6]}-{obs_datetime[6:8]}T{obs_datetime[8:10]}:{obs_datetime[10:12]}:{obs_datetime[12:14]}Z"
+                        observation["effectiveDateTime"] = formatted
+                elif hasattr(ds, 'StudyDate') and hasattr(ds, 'StudyTime'):
+                    study_date = format_dicom_date(str(ds.StudyDate))
+                    study_time = str(ds.StudyTime).strip()
+                    if len(study_time) >= 6 and study_time.isdigit():
+                        time = f"{study_time[:2]}:{study_time[2:4]}:{study_time[4:6]}"
+                        observation["effectiveDateTime"] = f"{study_date}T{time}Z"
+                    elif study_date:
+                        observation["effectiveDateTime"] = study_date
                 if hasattr(item, 'ObservationUID'):
                     observation["identifier"] = [{
                         "system": "urn:dicom:uid",
@@ -171,8 +231,11 @@ def create_diagnostic_report(patient_ref: str, observations: List[Dict[str, Any]
     study_time = str(ds.get('StudyTime', ''))
     if study_time:
         study_time = f"{study_time[:2]}:{study_time[2:4]}:{study_time[4:6]}"
-    
-    effective_date_time = f"{study_date}T{study_time}" if study_date and study_time else study_date
+
+    if study_date and study_time:
+        effective_date_time = f"{study_date}T{study_time}Z"  # Add 'Z' for UTC timezone
+    else:
+        effective_date_time = study_date
     
     # Get procedure code
     procedure_code = None
@@ -183,16 +246,16 @@ def create_diagnostic_report(patient_ref: str, observations: List[Dict[str, Any]
             "display": str(code_seq.get('CodeMeaning', 'Mammogram Diagnostic Report')),
             "system": str(code_seq.get('CodingSchemeDesignator', 'http://loinc.org'))
         }
-    
-    return {
+
+    report = {
         "resourceType": "DiagnosticReport",
-        "id": "report-1",
+        "id": generate_uuid(),
         "status": "final",
         "code": {
             "coding": [
                 procedure_code or {
                     "code": "24606-6",
-                    "display": "Mammogram Diagnostic Report",
+                    "display": "MG Breast Screening",
                     "system": "http://loinc.org"
                 }
             ]
@@ -201,63 +264,85 @@ def create_diagnostic_report(patient_ref: str, observations: List[Dict[str, Any]
             "reference": f"Patient/{patient_ref}"
         },
         "effectiveDateTime": effective_date_time,
-        "issued": datetime.now().isoformat(),
+        "issued": datetime.utcnow().isoformat() + 'Z',
         "performer": [
             {
                 "display": str(ds.get('ReferringPhysicianName', 'Unknown Physician'))
             }
         ],
-        "result": [{"reference": f"Observation/{obs['id']}"} for obs in observations],
+        "result": [{"reference": f"urn:uuid:{obs['id']}"} for obs in observations],
         "identifier": [
             {
                 "system": "urn:dicom:uid",
                 "value": str(ds.get('StudyInstanceUID', ''))
             }
-        ],
-        "imagingStudy": [
-            {
-                "reference": f"ImagingStudy/{ds.get('StudyInstanceUID', '')}"
-            }
         ]
     }
 
+    # Add narrative text
+    report["text"] = generate_narrative("DiagnosticReport", report)
+    
+    return report
+
+
 def dicom_to_fhir(dicom_path: str) -> Dict[str, Any]:
     """
-    Convert a DICOM SR file to FHIR format.
-    
+    Convert a DICOM SR file to a FHIR Bundle with proper fullUrl references.
+
     Args:
         dicom_path (str): Path to the DICOM SR file.
-        
+
     Returns:
-        Dict[str, Any]: FHIR message dictionary containing patient, observations, and diagnostic report.
+        Dict[str, Any]: FHIR Bundle.
     """
-    # Read DICOM file
     ds = pydicom.dcmread(dicom_path)
-    
-    # Extract patient information
+
+    # Extract patient
     patient = extract_patient_info(ds)
-    patient_ref = patient['id']
-    
+    patient_id = patient["id"]
+    patient_ref = f"urn:uuid:{patient_id}"
+
     # Extract observations
-    observations = extract_observations(ds, patient_ref)
-    
+    observations = extract_observations(ds, patient_id)
+
+    # Fix observation subject references
+    for obs in observations:
+        obs["subject"]["reference"] = patient_ref
+
     # Create diagnostic report
-    diagnostic_report = create_diagnostic_report(patient_ref, observations, ds)
-    
-    # Construct final FHIR message
-    fhir_message = {
-        "fhir": {
-            "patient": patient,
-            "observations": observations,
-            "diagnostic_report": diagnostic_report
-        }
+    diagnostic_report = create_diagnostic_report(patient_id, observations, ds)
+    diagnostic_report["subject"]["reference"] = patient_ref
+    diagnostic_report["result"] = [{"reference": f"urn:uuid:{obs['id']}"} for obs in observations]
+
+    # Construct Bundle entries
+    entries = [
+                  {
+                      "fullUrl": f"urn:uuid:{patient_id}",
+                      "resource": patient
+                  }
+              ] + [
+                  {
+                      "fullUrl": f"urn:uuid:{obs['id']}",
+                      "resource": obs
+                  } for obs in observations
+              ] + [
+                  {
+                      "fullUrl": f"urn:uuid:{diagnostic_report['id']}",
+                      "resource": diagnostic_report
+                  }
+              ]
+
+    # Return FHIR bundle
+    return {
+        "resourceType": "Bundle",
+        "type": "collection",
+        "entry": entries
     }
-    
-    return fhir_message
+
 
 if __name__ == "__main__":
     # Example usage
-    fhir_message = dicom_to_fhir("/media/zain/New Volume/PycharmProjects/DataFormation/hl7 work/brayz_sr.dcm")
+    fhir_message = dicom_to_fhir("brayz_sr.dcm")
     import json
     print(fhir_message)
     # Write the FHIR message to a JSON file

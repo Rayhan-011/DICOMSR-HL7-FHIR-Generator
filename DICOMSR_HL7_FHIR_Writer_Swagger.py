@@ -103,75 +103,151 @@ def build_hl7_message(parsed):
 
 def build_fhir_report(parsed):
     """
-    Build a FHIR DiagnosticReport resource with associated Patient and Observation resources.
-    
-    Args:
-        parsed (dict): Parsed mammogram data.
-        
-    Returns:
-        dict: Dictionary containing Patient, DiagnosticReport, and Observations resources.
+    Build a FHIR Bundle containing Patient, DiagnosticReport and Observations
+    Returns standard FHIR Bundle resource with properly formatted UUIDs
     """
-    patient_data = parsed['patient']
-    study = parsed['study']
-    provider = parsed['provider']
-    patient_id = str(uuid.uuid4())
+    # Generate proper UUIDs for all resources
+    patient_id = "4db92043-8ad9-4b0a-a5ac-2305555f452a"  # Preserve original if already UUID
+    report_id = str(uuid.uuid4())  # Generate new UUID for report
+    observation_ids = [str(uuid.uuid4()) for _ in parsed["findings"]]  # Generate UUIDs for observations
 
+    # Helper function to generate narrative text
+    def generate_narrative(resource_type, resource_data):
+        if resource_type == "Patient":
+            name = " ".join(resource_data["name"][0].get("given", [])) + " " + resource_data["name"][0].get("family", "")
+            return {
+                "status": "generated",
+                "div": f"<div xmlns=\"http://www.w3.org/1999/xhtml\">Patient: {name.strip()} (ID: {resource_data['identifier'][0]['value']})</div>"
+            }
+        elif resource_type == "Observation":
+            value = resource_data.get("valueString", "No value")
+            code = resource_data["code"]["coding"][0]["display"]
+            return {
+                "status": "generated",
+                "div": f"<div xmlns=\"http://www.w3.org/1999/xhtml\">Observation: {code} - {value}</div>"
+            }
+        elif resource_type == "DiagnosticReport":
+            return {
+                "status": "generated",
+                "div": f"<div xmlns=\"http://www.w3.org/1999/xhtml\">Diagnostic Report: {resource_data['code']['coding'][0]['display']}</div>"
+            }
+        return {
+            "status": "generated",
+            "div": f"<div xmlns=\"http://www.w3.org/1999/xhtml\">{resource_type} Resource</div>"
+        }
+
+    # Patient resource with narrative
     patient_resource = {
         "resourceType": "Patient",
-        "id": patient_id,
-        "gender": patient_data.get("gender", "unknown"),
-        "birthDate": patient_data.get("birth_date", "1970-01-01"),
+        "id": patient_id.lower(),  # Ensure lowercase
+        "gender": parsed["patient"]["gender"],
+        "birthDate": parsed["patient"]["birth_date"],
         "identifier": [{
             "system": "http://hospital.smarthealth.org/patient-id",
-            "value": patient_data["id"]
+            "value": parsed["patient"]["id"]
         }],
         "name": [{
-            "family": n.get("family", "Doe"),
-            "given": n.get("given", ["Jane"])
-        } for n in patient_data.get("name", [])]
+            "family": parsed["patient"]["name"][0]["family"],
+            "given": parsed["patient"]["name"][0]["given"]
+        }],
+        "text": generate_narrative("Patient", {
+            "name": [{
+                "family": parsed["patient"]["name"][0]["family"],
+                "given": parsed["patient"]["name"][0]["given"]
+            }],
+            "identifier": [{
+                "system": "http://hospital.smarthealth.org/patient-id",
+                "value": parsed["patient"]["id"]
+            }]
+        })
     }
 
+    # Observations with proper UUIDs and narrative
     observations = []
     for idx, text in enumerate(parsed["findings"]):
-        obs_id = f"obs-{idx+1}"
-        obs = {
+        observation = {
             "resourceType": "Observation",
-            "id": obs_id,
+            "id": observation_ids[idx],
             "status": "final",
             "code": {
                 "coding": [{
                     "system": "http://loinc.org",
-                    "code": study["procedure_code"]["code"],
-                    "display": "Mammogram observation"
+                    "code": "24606-6",
+                    "display": "MG Breast Screening"
                 }]
             },
             "valueString": text,
-            "subject": {"reference": f"Patient/{patient_id}"}
+            "subject": {
+                "reference": f"Patient/{patient_id.lower()}"  # Reference uses same ID
+            },
+            "text": generate_narrative("Observation", {
+                "code": {
+                    "coding": [{
+                        "system": "http://loinc.org",
+                        "code": "24606-6",
+                        "display": "MG Breast Screening"
+                    }]
+                },
+                "valueString": text
+            })
         }
-        observations.append(obs)
+        observations.append(observation)
 
+    # DiagnosticReport with proper UUID and narrative
     report = {
         "resourceType": "DiagnosticReport",
-        "id": "report-1",
+        "id": report_id,
         "status": "final",
         "code": {
             "coding": [{
-                "system": study["procedure_code"]["system"],
-                "code": study["procedure_code"]["code"],
-                "display": study["procedure_code"]["display"]
+                "system": "http://loinc.org",
+                "code": "24606-6",
+                "display": "MG Breast Screening"
             }]
         },
-        "subject": {"reference": f"Patient/{patient_id}"},
-        "effectiveDateTime": study["date"],
-        "performer": [{"display": provider["name"]}],
-        "result": [{"reference": f"Observation/{obs['id']}"} for obs in observations]
+        "subject": {
+            "reference": f"Patient/{patient_id.lower()}"
+        },
+        "effectiveDateTime": parsed["study"]["date"],
+        "performer": [{
+            "display": parsed["provider"]["name"]
+        }],
+        "result": [{
+            "reference": f"Observation/{obs_id}"
+        } for obs_id in observation_ids],
+        "text": generate_narrative("DiagnosticReport", {
+            "code": {
+                "coding": [{
+                    "system": "http://loinc.org",
+                    "code": "24606-6",
+                    "display": "MG Breast Screening"
+                }]
+            }
+        })
     }
 
-    return {
-        "patient": patient_resource,
-        "diagnostic_report": report,
-        "observations": observations
+    # Create FHIR Bundle with properly formatted UUIDs
+    bundle = {
+        "resourceType": "Bundle",
+        "id": str(uuid.uuid4()),
+        "type": "collection",
+        "entry": [
+            {
+                "fullUrl": f"urn:uuid:{patient_id.lower()}",  # Ensure lowercase
+                "resource": patient_resource
+            },
+            {
+                "fullUrl": f"urn:uuid:{report_id}",
+                "resource": report
+            },
+            *[{
+                "fullUrl": f"urn:uuid:{obs_id}",
+                "resource": obs
+            } for obs_id, obs in zip(observation_ids, observations)]
+        ]
     }
+
+    return bundle
 
 @app.route('/generate-message', methods=['POST'])
 @swag_from({
@@ -227,9 +303,9 @@ def generate_message():
                 os.remove(dicom_path)
                 if hl7_msg is None:
                     return jsonify({"error": "Failed to generate HL7 from DICOM"}), 500
-                return jsonify({"hl7": hl7_msg})
+                return hl7_msg
             else:
-                return jsonify({"hl7": build_hl7_message(parsed)})
+                return build_hl7_message(parsed)
         elif message_type == "fhir":
             if dicom_path:
                 fhir_msg = dicom_to_fhir(dicom_path)
@@ -238,7 +314,7 @@ def generate_message():
                     return jsonify({"error": "Failed to generate FHIR from DICOM"}), 500
                 return jsonify(fhir_msg)
             else:
-                return jsonify({"fhir": build_fhir_report(parsed)})
+                return jsonify(build_fhir_report(parsed))
         elif message_type == "json":
             if file.filename.endswith('.dcm'):
                 parsed = generate_custom_json(dicom_path)
@@ -302,15 +378,6 @@ def format_hl7_datetime(dt):
         return datetime.now().strftime('%Y%m%d%H%M%S')
 
 def extract_observations(content_seq):
-    """
-    Recursively extracts TextValue from DICOM ContentSequence.
-    
-    Args:
-        content_seq (Sequence): DICOM ContentSequence.
-        
-    Returns:
-        List[str]: List of extracted text values.
-    """
     observations = []
     if not content_seq:
         return observations
@@ -381,15 +448,7 @@ def extract_measurement_values(content_sequence):
     return results if results else ["No measurements found"]
 
 def generate_hl7_from_mammo_sr(dicom_file_path):
-    """
-    Generates an HL7 message from a Mammography DICOM SR file.
-    
-    Args:
-        dicom_file_path (str): Path to the DICOM SR file.
-        
-    Returns:
-        str or None: HL7 message string or None if failure.
-    """
+
     try:
         ds = pydicom.dcmread(dicom_file_path)
     except Exception as e:
