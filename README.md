@@ -39,6 +39,9 @@ It enables smooth integration of imaging workflows with EHR/EMR systems in compl
         │ - pydicom parser   │
         │ - HL7 generator    │
         │ - FHIR generator   │
+        │ - Internal parsing │
+        │   for mammogram SR │
+        │   DICOM files      │
         └─────┬──────────────┘
               │
               ▼
@@ -46,6 +49,7 @@ It enables smooth integration of imaging workflows with EHR/EMR systems in compl
  │ HL7 ORU^R01 Output │  │ FHIR R4 JSON Output│
  └────────────────────┘  └────────────────────┘
 ```
+ └────────────────────┘  └────────────────────┘
 
 ---
 
@@ -90,6 +94,32 @@ custom_json = generate_custom_json("path/to/dicom_file.dcm")
 print(custom_json)
 ```
 
+### hl7_msg_former.py
+
+This module constructs HL7 v2.5 message segments (`MSH`, `PID`, `OBR`, `ZDS`, `OBX`) from either JSON data or DICOM SR datasets. It assembles these segments into a complete HL7 ORU^R01 message.
+
+Key functions include:
+
+- `create_hl7_msh_segment(data)`: Creates the MSH segment.
+- `create_hl7_pid_segment(data)`: Creates the PID segment.
+- `create_obr_segment(data)`: Creates the OBR segment.
+- `create_zds_segment(data)`: Creates the ZDS segment.
+- `create_obx_segments(data)`: Creates OBX segments from findings.
+- `create_hl7_message(data)`: Assembles all segments into a full HL7 message.
+
+**Example usage:**
+
+```python
+from hl7_msg_former import create_hl7_message
+
+hl7_message = create_hl7_message(json_data_or_dicom_dataset)
+print(hl7_message)
+```
+
+### obx_former.py
+
+This helper module generates OBX segments specifically from mammogram DICOM SR datasets. It is used internally by `hl7_msg_former.py` to build observation segments.
+
 ### DICOMSR_HL7_FHIR_Writer_Swagger.py
 
 This is the main Flask API service that provides the `/generate-message` endpoint. It supports generating HL7, FHIR, or JSON messages from uploaded DICOM SR or JSON files. Features include:
@@ -110,6 +140,7 @@ curl -X POST http://localhost:5000/generate-message \
   -F "message_type=fhir" \
   -F "file=@path/to/dicom_file.dcm"
 ```
+
 
 
 ---
@@ -207,7 +238,8 @@ Postman JSON export file available upon request.
 Use:
 
 * [NIST HL7 Validator](https://hl7v2tools.nist.gov/)
-* HL7 Inspector tool
+* HL7 Validator tool 
+* https://freeonlineformatter.com/hl7-validator
 
 ### ✅ FHIR Validation
 
@@ -215,6 +247,7 @@ Use:
 
 * [HL7 FHIR Validator JAR](https://confluence.hl7.org/display/FHIR/Using+the+FHIR+Validator)
 * [HAPI FHIR Server](https://hapi.fhir.org/)
+* FHIR Validator : https://validator.fhir.org/
 
 ---
 

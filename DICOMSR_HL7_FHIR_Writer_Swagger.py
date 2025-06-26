@@ -1,30 +1,19 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flasgger import Swagger, swag_from
 import pydicom
 import uuid
 import os
 import json
 import tempfile
-from datetime import datetime
 import logging
-from dicom_to_fhir import dicom_to_fhir  # Import the function from your DICOM SR parser module
+from fhir_message_genrate import dicom_to_fhir  # Import the function from your DICOM SR parser module
 from dicom_to_json import generate_custom_json
+from hl7_msg_former import create_hl7_message
+import re
+
 
 app = Flask(__name__)
 swagger = Swagger(app)
-
-def escape_hl7(text):
-    """
-    Escape special HL7 characters in the given text.
-    HL7 uses special characters like \, |, ^, & which need to be escaped.
-    
-    Args:
-        text (str): Input text to escape.
-        
-    Returns:
-        str: Escaped text.
-    """
-    return text.replace('\\', '\\E\\').replace('|', '\\F\\').replace('^', '\\S\\').replace('&', '\\T\\')
 
 def parse_mammo_sr(dcm_file):
     """
@@ -73,39 +62,22 @@ def parse_mammo_sr(dcm_file):
         "findings": findings
     }
 
-def build_hl7_message(parsed):
-    """
-    Build an HL7 ORU^R01 message string from parsed mammogram data.
-    
-    Args:
-        parsed (dict): Parsed mammogram data.
-        
-    Returns:
-        str: HL7 message string.
-    """
-    patient = parsed['patient']
-    study = parsed['study']
-    provider = parsed['provider']
-
-    gender_map = {'male': 'M', 'female': 'F', 'other': 'O', 'unknown': 'U'}
-    hl7_gender = gender_map.get(patient.get('gender', 'unknown'), 'U')
-    birth_date = patient.get('birth_date', '')
-
-    pid = f"PID|||{patient['id']}||{patient['name'][0]['family']}^{patient['name'][0]['given'][0]}||{birth_date}|{hl7_gender}"
-    obr = f"OBR|1|{study['accession_number']}||{study['procedure_code']['code']}^{study['procedure_code']['display']}||{study['date']}|||||||{provider['name']}||||||{study.get('modality', '')}"
-
-    obx = ""
-    for idx, text in enumerate(parsed['findings']):
-        obx += f"OBX|{idx+1}|TX|||{escape_hl7(text)}||||||F\n"
-
-    msh = f"MSH|^~\\&|MAMMO_SYS|MAMMO_HOSP|HL7_RECEIVER|HOSP|{datetime.now().strftime('%Y%m%d%H%M%S')}||ORU^R01|{uuid.uuid4()}|P|2.3"
-    return f"{msh}\n{pid}\n{obr}\n{obx}".strip()
 
 def build_fhir_report(parsed):
+
     """
     Build a FHIR Bundle containing Patient, DiagnosticReport and Observations
     Returns standard FHIR Bundle resource with properly formatted UUIDs
     """
+
+    # Remove <html> and <body> tags
+    for finding in parsed["findings"]:
+        if finding["type"] == "html":
+            value = finding["value"]
+            # Remove opening and closing <html> and <body> tags using regex
+            value = re.sub(r'</?(html|body)>', '', value, flags=re.IGNORECASE)
+            finding["value"] = value.strip()
+
     # Generate proper UUIDs for all resources
     patient_id = "4db92043-8ad9-4b0a-a5ac-2305555f452a"  # Preserve original if already UUID
     report_id = str(uuid.uuid4())  # Generate new UUID for report
@@ -164,22 +136,27 @@ def build_fhir_report(parsed):
 
     # Observations with proper UUIDs and narrative
     observations = []
-    for idx, text in enumerate(parsed["findings"]):
+    for idx, finding in enumerate(parsed["findings"]):
+        value = finding if isinstance(finding, str) else finding.get("value", str(finding))
         observation = {
             "resourceType": "Observation",
             "id": observation_ids[idx],
             "status": "final",
             "code": {
                 "coding": [{
-                    "system": "http://loinc.org",
-                    "code": "24606-6",
-                    "display": "MG Breast Screening"
+                    "system": "http://loinc.org"
                 }]
             },
-            "valueString": text,
+            "valueString": value,
+            "effectiveDateTime": parsed["study"]["date"],
             "subject": {
-                "reference": f"Patient/{patient_id.lower()}"  # Reference uses same ID
+                "reference": f"Patient/{patient_id.lower()}"
             },
+            "performer": [
+                {
+                 "display": "Radiologist System"
+                }
+            ],
             "text": generate_narrative("Observation", {
                 "code": {
                     "coding": [{
@@ -188,7 +165,7 @@ def build_fhir_report(parsed):
                         "display": "MG Breast Screening"
                     }]
                 },
-                "valueString": text
+                "valueString": value
             })
         }
         observations.append(observation)
@@ -210,7 +187,7 @@ def build_fhir_report(parsed):
         },
         "effectiveDateTime": parsed["study"]["date"],
         "performer": [{
-            "display": parsed["provider"]["name"]
+            "display": parsed.get("provider", {}).get("name") or "Radiologist System"
         }],
         "result": [{
             "reference": f"Observation/{obs_id}"
@@ -249,6 +226,7 @@ def build_fhir_report(parsed):
 
     return bundle
 
+
 @app.route('/generate-message', methods=['POST'])
 @swag_from({
     'parameters': [
@@ -261,11 +239,9 @@ def build_fhir_report(parsed):
         500: {"description": "Server error"}
     }
 })
+
 def generate_message():
     try:
-        message_type = None
-        parsed = None
-        hl7_msg = None
         dicom_path = None
 
         if request.content_type and 'application/json' in request.content_type:
@@ -299,17 +275,25 @@ def generate_message():
 
         if message_type == "hl7":
             if dicom_path:
-                hl7_msg = generate_hl7_from_mammo_sr(dicom_path)
+                ds = pydicom.dcmread(dicom_path)
+                hl7_msg = create_hl7_message(ds)
                 os.remove(dicom_path)
+
                 if hl7_msg is None:
                     return jsonify({"error": "Failed to generate HL7 from DICOM"}), 500
-                return hl7_msg
+                return Response(hl7_msg, mimetype='application/hl7-v2')
+
             else:
-                return build_hl7_message(parsed)
+                hl7_msg = create_hl7_message(parsed_json)
+
+                return Response(hl7_msg, mimetype='application/hl7-v2')
+
         elif message_type == "fhir":
             if dicom_path:
-                fhir_msg = dicom_to_fhir(dicom_path)
+                ds = pydicom.dcmread(dicom_path)
+                fhir_msg = dicom_to_fhir(ds)
                 os.remove(dicom_path)
+
                 if fhir_msg is None:
                     return jsonify({"error": "Failed to generate FHIR from DICOM"}), 500
                 return jsonify(fhir_msg)
@@ -324,202 +308,13 @@ def generate_message():
     except Exception as e:
         return jsonify({"error": f"Processing failed: {str(e)}"}), 500
 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def format_patient_name(ds):
-    patient_name = ds.PatientName
-    if patient_name == 'Anonymous Patient':
-        return 'Anonymous^Patient'
-    else:
-        parts = str(patient_name).split('^')
-        if len(parts) >= 2:
-            return f"{parts[0]}^{parts[1]}"
-        else:
-            return f"{patient_name}^"
-
-def get_dicom_value(ds, tag, default=''):
-    """
-    Safely retrieves the DICOM tag value as a string.
-    
-    Args:
-        ds (pydicom.Dataset): The DICOM dataset.
-        tag (Union[int, Tuple[int, int]]): DICOM tag.
-        default (str): Default value if tag not found.
-        
-    Returns:
-        str: Value of the DICOM tag or default.
-    """
-    try:
-        value = ds.get(tag, default)
-        if isinstance(value, pydicom.DataElement):
-            value = value.value
-        if isinstance(value, (list, tuple)):
-            return ','.join(map(str, value))
-        return str(value)
-    except Exception as e:
-        logger.warning(f"Failed to retrieve DICOM tag {tag}: {str(e)}")
-        return default
-
-def format_hl7_datetime(dt):
-    """
-    Formats a datetime object into the HL7 standard format YYYYMMDDHHMMSS.
-    
-    Args:
-        dt (datetime): Datetime object.
-        
-    Returns:
-        str: Formatted datetime string.
-    """
-    try:
-        return dt.strftime('%Y%m%d%H%M%S')
-    except Exception as e:
-        logger.warning(f"Failed to format datetime: {str(e)}")
-        return datetime.now().strftime('%Y%m%d%H%M%S')
-
-def extract_observations(content_seq):
-    observations = []
-    if not content_seq:
-        return observations
-    for item in content_seq:
-        if hasattr(item, 'TextValue'):
-            text_value = get_dicom_value(item, 'TextValue', '')
-            if text_value:
-                observations.append(text_value)
-        if hasattr(item, 'ContentSequence'):
-            observations.extend(extract_observations(item.ContentSequence))
-    return observations
-
-def extract_image_quality(content_sequence):
-    """
-    Recursively extract Image Quality descriptions from the SR.
-    
-    Args:
-        content_sequence (Sequence): DICOM ContentSequence.
-        
-    Returns:
-        List[str]: List of image quality descriptions.
-    """
-    results = []
-
-    def recursive_search(sequence):
-        for item in sequence:
-            concept = getattr(item, "ConceptNameCodeSequence", [{}])[0]
-            code_meaning = getattr(concept, "CodeMeaning", "").lower()
-            if "image quality" in code_meaning:
-                quality = getattr(item, "TextValue", "") or getattr(item, "ConceptCodeSequence", [{}])[0].get("CodeMeaning", "")
-                if quality:
-                    results.append(quality)
-            if hasattr(item, "ContentSequence"):
-                recursive_search(item.ContentSequence)
-
-    recursive_search(content_sequence)
-    return results if results else ["No image quality info found"]
-
-def extract_measurement_values(content_sequence):
-    """
-    Extracts measurement values with their units and labels from the SR.
-    
-    Args:
-        content_sequence (Sequence): DICOM ContentSequence.
-        
-    Returns:
-        List[str]: List of measurement descriptions.
-    """
-    results = []
-
-    def recursive_search(sequence):
-        for item in sequence:
-            if getattr(item, "ValueType", "") == "NUM":
-                concept = getattr(item, "ConceptNameCodeSequence", [{}])[0]
-                label = getattr(concept, "CodeMeaning", "Unknown measurement")
-
-                numeric_value = getattr(item, "NumericValue", None)
-                units = getattr(item, "MeasuredValueSequence", [{}])[0].get("MeasurementUnitsCodeSequence", [{}])[0].get("CodeValue", "")
-                unit_meaning = getattr(item, "MeasuredValueSequence", [{}])[0].get("MeasurementUnitsCodeSequence", [{}])[0].get("CodeMeaning", "")
-
-                if numeric_value is not None:
-                    result_str = f"{label}: {numeric_value} {unit_meaning or units}"
-                    results.append(result_str)
-            if hasattr(item, "ContentSequence"):
-                recursive_search(item.ContentSequence)
-
-    recursive_search(content_sequence)
-    return results if results else ["No measurements found"]
-
-def generate_hl7_from_mammo_sr(dicom_file_path):
-
-    try:
-        ds = pydicom.dcmread(dicom_file_path)
-    except Exception as e:
-        logger.error(f"Failed to read DICOM file: {str(e)}")
-        return None
-
-    patient_id = get_dicom_value(ds, (0x0010, 0x0020), 'secret ID')
-
-    patient_name = get_dicom_value(ds, (0x0010, 0x0010), 'Anonymous^Patient')
-    if patient_name != 'Anonymous^Patient':
-        parts = patient_name.split(' ')
-        if len(parts) >= 2:
-            patient_name = f"{parts[0]}^{parts[1]}"
-        else:
-            patient_name = f"{parts[0]}^"
-
-    patient_dob = str(ds.get('PatientBirthDate', '00000101'))
-    if '-' in patient_dob:
-        patient_dob = patient_dob.replace('-', '')
-    if len(patient_dob) != 8:
-        patient_dob = ''
-
-    patient_sex = get_dicom_value(ds, (0x0010, 0x0040), '')
-    if patient_sex not in ['M', 'F', 'O', 'U']:
-        patient_sex = patient_sex.upper()
-
-    accession_number = getattr(ds, 'AccessionNumber', 'UNKNOWN')
-    study_date = getattr(ds, 'StudyDate', '')
-    study_time = getattr(ds, 'StudyTime', '000000')
-
-    dt_str = study_date + study_time
-    try:
-        dt_study = datetime.strptime(dt_str, '%Y%m%d%H%M%S')
-    except ValueError:
-        logger.warning("Invalid study date/time, using current datetime")
-        dt_study = datetime.now()
-
-    hl7_date = format_hl7_datetime(dt_study)
-
-    observations = extract_observations(getattr(ds, 'ContentSequence', []))
-    if not observations:
-        observations = ["No observations extracted"]
-
-    image_quality = extract_image_quality(getattr(ds, 'ContentSequence', []))
-    measurements = extract_measurement_values(getattr(ds, 'ContentSequence', []))
-
-    message_control_id = str(uuid.uuid4())
-    msh = f"MSH|^~\\&|MAMMO_SYS|MAMMO_HOSP|HL7_RECEIVER|HOSP|{hl7_date}||ORU^R01|{message_control_id}|P|2.3|"
-    pid = f"PID|||{patient_id}||{patient_name}||{patient_dob}|{patient_sex}||"
-    obr = f"OBR|1||{accession_number}|24606-6^Mammogram Diagnostic Report^LN|{hl7_date}|||||||||Dr. Emily Carter||||||MG|"
-
-    obx_segments = []
-    index = 1
-    for obs in observations:
-        clean_obs = obs.replace('\n', ' ').replace('\r', '').strip()
-        obx_segments.append(f"OBX|{index}|TX|||{clean_obs}||||||F|")
-        index += 1
-
-    for quality in image_quality:
-        clean_quality = quality.replace('\n', ' ').replace('\r', '').strip()
-        obx_segments.append(f"OBX|{index}|TX|||Image Quality: {clean_quality}||||||F|")
-        index += 1
-
-    for meas in measurements:
-        clean_meas = meas.replace('\n', ' ').replace('\r', '').strip()
-        obx_segments.append(f"OBX|{index}|TX|||Measurement: {clean_meas}||||||F|")
-        index += 1
-
-    hl7_message = '\n'.join([msh, pid, obr] + obx_segments)
-    return hl7_message
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)
+
+
 

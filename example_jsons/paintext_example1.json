@@ -1,0 +1,41 @@
+{
+  "message_type": "json",
+  "patient": {
+    "id": "454721",
+    "name": [
+      {
+        "given": [],
+        "family": "Anonymous"
+      }
+    ],
+    "gender": "female",
+    "birth_date": "1990-04-26"
+  },
+  "provider": {
+    "id": "",
+    "name": "",
+    "department": ""
+  },
+  "study": {
+    "date": "2024-04-26",
+    "accession_number": "A10000000777",
+    "modality": "P",
+    "procedure_code": {
+      "code": "Exam Code",
+      "display": "Exam Label",
+      "system": "http://loinc.org"
+    },
+    "study_instance_uid": "1.2.840.10008.3.1.2.3.3.123456789"
+  },
+  "findings": [
+    {
+      "type": "text",
+      "value": "0.00"
+    },
+    {
+      "type": "text",
+      "value": "Text integrated into the report"
+    }
+  ],
+  "note": "Comment recorded in the Xplore database"
+}
