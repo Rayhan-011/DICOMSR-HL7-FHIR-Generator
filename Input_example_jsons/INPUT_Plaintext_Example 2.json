@@ -1,0 +1,56 @@
+{
+  "message_type": "json",
+  "patient": {
+    "id": "A0123456789",
+    "name": [
+      {
+        "given": [],
+        "family": "Anonymous"
+      }
+    ],
+    "gender": "female",
+    "birth_date": "1990-04-26"
+  },
+  "provider": {
+    "id": "",
+    "name": "",
+    "department": ""
+  },
+  "study": {
+    "accession_number": "A0456789123",
+    "modality": "MG",
+    "date": "2024-04-04",
+    "procedure_code": {
+      "code": "",
+      "display": "Exam Label",
+      "system": "http://loinc.org"
+    },
+    "study_instance_uid" : "1.2.840.10008.3.1.2.3.3.123456789"
+  },
+  "findings": [
+    {
+      "type": "text",
+      "value": "ABNORMAL"
+    },
+    {
+      "type": "text",
+      "value": "abnormal"
+    },
+    {
+      "type": "text",
+      "value": "normal"
+    },
+    {
+      "type": "text",
+      "value": "XXX"
+    },
+    {
+      "type": "text",
+      "value": "XXX"
+    },
+    {
+      "type": "text",
+      "value": "XXX"
+    }
+  ]
+}

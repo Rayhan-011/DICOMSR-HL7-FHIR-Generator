@@ -1,0 +1,6 @@
+MSH|^~\&|PythonApp|PythonFacility|HL7ReceiverApp|HL7ReceiverFacility|20250627192349||ORU^R01|c05cc2cf-7ad7-46e7-ac55-67378d0d8301|P|2.5|||AL|NE|USA|UNICODE UTF-8
+PID|1||454721||Anonymous^||19900426|F|||||||||
+OBR|1||A10000000777|Exam Code^Exam Label^LN||||20240426000000||||||||^|||A10000000777||||||P
+ZDS|1.2.840.10008.3.1.2.3.3.123456789
+OBX|1|ST|RESULTSTAG^^AIENGINE||0.00||||||F
+OBX|2|ST|RESULTSTAG^^AIENGINE||Text integrated into the report||||||F
