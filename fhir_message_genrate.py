@@ -5,6 +5,15 @@ from typing import Dict, List, Any
 import json
 
 def extract_sr_report(ds):
+    """
+    Extract and parse the ContentSequence from a DICOM SR dataset.
+
+    Args:
+        ds (pydicom.Dataset): The DICOM dataset.
+
+    Returns:
+        str: Parsed report as a string or message if ContentSequence is missing.
+    """
     if not hasattr(ds, 'ContentSequence'):
         return "No ContentSequence found."
 
@@ -15,6 +24,17 @@ def extract_sr_report(ds):
 
 
 def parse_item(item, output, level):
+    """
+    Recursively parse an item in the ContentSequence to extract structured data.
+
+    Args:
+        item (pydicom.Dataset): The current item in the ContentSequence.
+        output (list): List to accumulate parsed strings.
+        level (int): Current indentation level for nested items.
+
+    Returns:
+        None
+    """
     indent = "  " * level
 
     # Get concept name if exists
@@ -60,6 +80,17 @@ def parse_item(item, output, level):
             parse_item(sub_item, output, level + 1)
 
 def process_acquisition_context(image_item, output, level):
+    """
+    Process acquisition context items within an image item in the ContentSequence.
+
+    Args:
+        image_item (pydicom.Dataset): The image item containing acquisition context.
+        output (list): List to accumulate parsed strings.
+        level (int): Current indentation level.
+
+    Returns:
+        None
+    """
     indent = "  " * level
     if not hasattr(image_item, "ContentSequence"):
         return
@@ -222,16 +253,24 @@ def extract_patient_info(ds: pydicom.Dataset) -> Dict[str, Any]:
 
 
 def extract_observations(ds, report, patient_ref) -> List[Dict[str, Any]]:
+    """
+    Extract observations from the DICOM SR report text and create FHIR Observation resources.
+
+    Args:
+        ds (pydicom.Dataset): The DICOM dataset.
+        report (str): The parsed SR report text.
+        patient_ref (str): Reference ID for the patient.
+
+    Returns:
+        List[Dict[str, Any]]: List of FHIR Observation resources.
+    """
     observations = []
 
     def process_content_sequence(report, parent_code=None):
-
         report_list = report.split('\n')
-
         heading = ''
 
         for i, line in enumerate(report_list):
-
             leading_spaces = len(line) - len(line.lstrip(' '))
             if leading_spaces == 0:
                 heading = line
@@ -242,7 +281,6 @@ def extract_observations(ds, report, patient_ref) -> List[Dict[str, Any]]:
                     line = "DXm image"
                 else:
                     continue
-
 
             # Get observation code if available
             line_data = line.lstrip()
@@ -368,6 +406,15 @@ def create_diagnostic_report(patient_ref: str, observations: List[Dict[str, Any]
 
 
 def dicom_to_fhir(ds):
+    """
+    Convert a DICOM SR dataset to a FHIR Bundle resource.
+
+    Args:
+        ds (pydicom.Dataset): The DICOM dataset.
+
+    Returns:
+        Dict[str, Any]: FHIR Bundle resource containing Patient, Observations, and DiagnosticReport.
+    """
     report = extract_sr_report(ds)
 
     # Extract patient
@@ -382,30 +429,30 @@ def dicom_to_fhir(ds):
     for obs in observations:
         obs["subject"]["reference"] = patient_ref
 
-        # Create diagnostic report
-        diagnostic_report = create_diagnostic_report(patient_id, observations, ds)
-        diagnostic_report["subject"]["reference"] = patient_ref
-        diagnostic_report["result"] = [{"reference": f"urn:uuid:{obs['id']}"} for obs in observations]
+    # Create diagnostic report
+    diagnostic_report = create_diagnostic_report(patient_id, observations, ds)
+    diagnostic_report["subject"]["reference"] = patient_ref
+    diagnostic_report["result"] = [{"reference": f"urn:uuid:{obs['id']}"} for obs in observations]
 
-        # Construct Bundle entries
-        entries = [
-                      {
-                          "fullUrl": f"urn:uuid:{patient_id}",
-                          "resource": patient
-                      }
-                  ] + [
-                      {
-                          "fullUrl": f"urn:uuid:{obs['id']}",
-                          "resource": obs
-                      } for obs in observations
-                  ] + [
-                      {
-                          "fullUrl": f"urn:uuid:{diagnostic_report['id']}",
-                          "resource": diagnostic_report
-                      }
-                  ]
+    # Construct Bundle entries
+    entries = [
+        {
+            "fullUrl": f"urn:uuid:{patient_id}",
+            "resource": patient
+        }
+    ] + [
+        {
+            "fullUrl": f"urn:uuid:{obs['id']}",
+            "resource": obs
+        } for obs in observations
+    ] + [
+        {
+            "fullUrl": f"urn:uuid:{diagnostic_report['id']}",
+            "resource": diagnostic_report
+        }
+    ]
 
-    return{
+    return {
         "resourceType": "Bundle",
         "type": "collection",
         "entry": entries
@@ -430,28 +477,28 @@ if __name__ == "__main__":
     for obs in observations:
         obs["subject"]["reference"] = patient_ref
 
-        # Create diagnostic report
-        diagnostic_report = create_diagnostic_report(patient_id, observations, ds)
-        diagnostic_report["subject"]["reference"] = patient_ref
-        diagnostic_report["result"] = [{"reference": f"urn:uuid:{obs['id']}"} for obs in observations]
+    # Create diagnostic report
+    diagnostic_report = create_diagnostic_report(patient_id, observations, ds)
+    diagnostic_report["subject"]["reference"] = patient_ref
+    diagnostic_report["result"] = [{"reference": f"urn:uuid:{obs['id']}"} for obs in observations]
 
-        # Construct Bundle entries
-        entries = [
-                      {
-                          "fullUrl": f"urn:uuid:{patient_id}",
-                          "resource": patient
-                      }
-                  ] + [
-                      {
-                          "fullUrl": f"urn:uuid:{obs['id']}",
-                          "resource": obs
-                      } for obs in observations
-                  ] + [
-                      {
-                          "fullUrl": f"urn:uuid:{diagnostic_report['id']}",
-                          "resource": diagnostic_report
-                      }
-                  ]
+    # Construct Bundle entries
+    entries = [
+        {
+            "fullUrl": f"urn:uuid:{patient_id}",
+            "resource": patient
+        }
+    ] + [
+        {
+            "fullUrl": f"urn:uuid:{obs['id']}",
+            "resource": obs
+        } for obs in observations
+    ] + [
+        {
+            "fullUrl": f"urn:uuid:{diagnostic_report['id']}",
+            "resource": diagnostic_report
+        }
+    ]
 
     print({
         "resourceType": "Bundle",
@@ -461,8 +508,8 @@ if __name__ == "__main__":
 
     with open("output.json", "w") as f:
         json.dump({
-        "resourceType": "Bundle",
-        "type": "collection",
-        "entry": entries
-        },f, indent=4)
+            "resourceType": "Bundle",
+            "type": "collection",
+            "entry": entries
+        }, f, indent=4)
 

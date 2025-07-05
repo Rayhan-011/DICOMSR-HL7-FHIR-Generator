@@ -10,18 +10,20 @@ from fhir_message_genrate import dicom_to_fhir  # Import the function from your 
 from dicom_to_json import generate_custom_json
 from hl7_msg_former import create_hl7_message
 import re
+from flask_cors import CORS
 
 
 app = Flask(__name__)
+CORS(app)
 swagger = Swagger(app)
 
 def parse_mammo_sr(dcm_file):
     """
     Parse a mammogram Structured Report (SR) DICOM file to extract relevant information.
-    
+
     Args:
         dcm_file (str): Path to the DICOM SR file.
-        
+
     Returns:
         dict: Parsed data including patient info, study details, provider info, and findings.
     """
@@ -241,6 +243,14 @@ def build_fhir_report(parsed):
 })
 
 def generate_message():
+    """
+    Flask endpoint to generate HL7, FHIR, or JSON messages from DICOM SR or JSON input.
+
+    Accepts multipart form-data or JSON payload with message_type and file or data.
+
+    Returns:
+        Response: HL7 message, FHIR JSON, or parsed JSON response.
+    """
     try:
         dicom_path = None
 
@@ -315,6 +325,7 @@ logger = logging.getLogger(__name__)
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)
+
 
 
 

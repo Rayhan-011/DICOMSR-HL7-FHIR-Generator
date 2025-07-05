@@ -4,12 +4,25 @@ from typing import Union, List
 import pydicom
 from obx_former import generate_obx_from_mammo_sr
 
-
 def create_hl7_msh_segment(data: dict) -> str:
+    """
+    Create the HL7 MSH (Message Header) segment.
+
+    Args:
+        data (dict or pydicom.dataset.FileDataset): Input data source.
+
+    Returns:
+        str: Formatted MSH segment string.
+    """
     field_sep = '|'
     encoding_chars = '^~\\&'
 
-    # MSH-1 to MSH-18
+    if type(data) is not dict:
+        specific_char_set = getattr(data, 'SpecificCharacterSet')
+    else:
+        specific_char_set = 'UNICODE UTF-8'
+
+    # MSH-1 to MSH-18 fields
     msh_fields = [
         'MSH',                        # Segment name
         #field_sep,                    # MSH-1: Field Separator (represented by the field_sep itself)
@@ -29,15 +42,23 @@ def create_hl7_msh_segment(data: dict) -> str:
         'AL',                         # MSH-15: Accept Acknowledgment Type
         'NE',                         # MSH-16: Application Acknowledgment Type
         'USA',                        # MSH-17: Country Code
-        'UNICODE UTF-8'              # MSH-18: Character Set
+        specific_char_set             # MSH-18: Character Set
     ]
 
-    # Construct the MSH string (note: field separator is not included as a field, it's used between fields)
+    # Construct the MSH string (field separator is used between fields)
     msh_segment = field_sep.join(msh_fields)
     return msh_segment
 
-
 def create_hl7_pid_segment(source: Union[dict, pydicom.dataset.FileDataset]) -> str:
+    """
+    Create the HL7 PID (Patient Identification) segment.
+
+    Args:
+        source (dict or pydicom.dataset.FileDataset): Input data source.
+
+    Returns:
+        str: Formatted PID segment string.
+    """
     field_sep = '|'
     component_sep = '^'
 
@@ -103,8 +124,17 @@ def create_hl7_pid_segment(source: Union[dict, pydicom.dataset.FileDataset]) -> 
     # Return the PID segment string
     return field_sep.join(pid_fields)
 
-
 def create_obr_segment(data: Union[dict, pydicom.dataset.FileDataset], obr_set_id=1) -> str:
+    """
+    Create the HL7 OBR (Observation Request) segment.
+
+    Args:
+        data (dict or pydicom.dataset.FileDataset): Input data source.
+        obr_set_id (int): Set ID for the OBR segment.
+
+    Returns:
+        str: Formatted OBR segment string.
+    """
     field_sep = '|'
     comp_sep = '^'
 
@@ -191,10 +221,11 @@ def create_obr_segment(data: Union[dict, pydicom.dataset.FileDataset], obr_set_i
             observation_datetime,          # OBR-7: Observation Date/Time
             "", "", "", "", "", "", "",    # OBR-8 to OBR-15
             ordering_provider,             # OBR-16: Ordering Provider
-            "", "",                        # OBR-17, OBR-18 (Accession duplication)
+            "",                            # OBR-17
             accession_number,              # OBR-18
             "", "", "", "", "",            # OBR-19 to OBR-23
-            modality                       # OBR-24: Diagnostic Service Section ID
+            modality,
+            "F"                            # OBR-25: Status
         ]
         return field_sep.join(obr_fields)
 
@@ -205,8 +236,16 @@ def create_obr_segment(data: Union[dict, pydicom.dataset.FileDataset], obr_set_i
     else:
         raise ValueError("Input must be a JSON dictionary or pydicom DICOM SR dataset.")
 
-
 def create_zds_segment(data: Union[dict, pydicom.dataset.FileDataset]) -> str:
+    """
+    Create the HL7 ZDS segment.
+
+    Args:
+        data (dict or pydicom.dataset.FileDataset): Input data source.
+
+    Returns:
+        str: Formatted ZDS segment string.
+    """
     field_sep = '|'
 
     # Helper for JSON input
@@ -220,9 +259,12 @@ def create_zds_segment(data: Union[dict, pydicom.dataset.FileDataset]) -> str:
     # Helper for DICOM input
     def from_dicom():
         study_instance_uid = getattr(data, "StudyInstanceUID", "").strip()
+        series_instance_uid = getattr(data, "SeriesInstanceUID", "").strip()
+        sop_instance_uid = getattr(data, "SOPInstanceUID", "").strip()
         if not study_instance_uid:
             raise ValueError("StudyInstanceUID is required in DICOM to create ZDS segment.")
-        return f"ZDS{field_sep}{study_instance_uid}"
+
+        return f"ZDS{field_sep}{sop_instance_uid}{field_sep}{series_instance_uid}{field_sep}{study_instance_uid}"
 
     # Determine source type
     if isinstance(data, dict):
@@ -232,8 +274,16 @@ def create_zds_segment(data: Union[dict, pydicom.dataset.FileDataset]) -> str:
     else:
         raise TypeError("Input must be a dictionary (JSON) or a pydicom DICOM dataset.")
 
+def create_obx_report_segments(data: Union[dict, pydicom.dataset.FileDataset]) -> List[str]:
+    """
+    Create HL7 OBX segments from findings in JSON or DICOM SR dataset.
 
-def create_obx_segments(data: Union[dict, pydicom.dataset.FileDataset]) -> List[str]:
+    Args:
+        data (dict or pydicom.dataset.FileDataset): Input data source.
+
+    Returns:
+        List[str]: List of formatted OBX segment strings.
+    """
     field_sep = '|'
     comp_sep = '^'
     obx_segments = []
@@ -280,18 +330,102 @@ def create_obx_segments(data: Union[dict, pydicom.dataset.FileDataset]) -> List[
 
     return obx_segments
 
+def generate_sr_obx_UID_segments(ds):
+    """
+    Generate OBX segments for SR Document SOP Instance UID and related references.
+
+    Args:
+        ds (pydicom.Dataset): The DICOM dataset.
+
+    Returns:
+        List[str]: List of OBX segment strings.
+    """
+    obx_segments = []
+
+    # OBX for SR Document SOP Instance UID
+    sr_uid = ds.SOPInstanceUID
+    obx_segments.append(['HD', 'SRINSTANCEUID^SR Instance UID^99IHE', '1', sr_uid])
+
+    # Step 1: Build SOPInstanceUID → (SeriesInstanceUID, StudyInstanceUID) map
+    sop_uid_map = {}
+    for seq_tag in ['CurrentRequestedProcedureEvidenceSequence', 'PertinentOtherEvidenceSequence']:
+        if seq_tag not in ds:
+            continue
+        for study_item in ds[seq_tag]:
+            study_uid = getattr(study_item, 'StudyInstanceUID', '')
+            for series_item in study_item.get('ReferencedSeriesSequence', []):
+                series_uid = getattr(series_item, 'SeriesInstanceUID', '')
+                for ref in series_item.get('ReferencedSOPSequence', []):
+                    sop_uid = ref.ReferencedSOPInstanceUID
+                    sop_uid_map[sop_uid] = (series_uid, study_uid)
+
+    # Step 2: Walk through SR Content Sequence
+    def walk_content_sequence(seq, sub_id_start, seen=set()):
+        obx_data = []
+        sub_id = sub_id_start
+
+        for item in seq:
+            if 'ReferencedSOPSequence' in item:
+                for ref in item.ReferencedSOPSequence:
+                    sop_uid = ref.ReferencedSOPInstanceUID
+                    sop_class_uid = ref.ReferencedSOPClassUID
+
+                    if sop_uid in seen:
+                        continue
+                    seen.add(sop_uid)
+
+                    # Lookup Series and Study UID
+                    series_uid, study_uid = sop_uid_map.get(sop_uid, ('', ''))
+
+
+                    obx_data.append(['ST', 'STUDYINSTANCEUID^Study Instance UID^99IHE', str(sub_id), study_uid])
+                    obx_data.append(['ST', 'SERIESINSTANCEUID^Series Instance UID^99IHE', str(sub_id), series_uid])
+                    obx_data.append(['ST', 'SOPINSTANCEUID^SOP Instance UID^99IHE', str(sub_id), sop_uid])
+                    obx_data.append(['ST', 'SOPCLASSUID^SOP Class UID^99IHE', str(sub_id), sop_class_uid])
+
+                    sub_id += 1
+
+            if 'ContentSequence' in item:
+                nested_obx, sub_id = walk_content_sequence(item.ContentSequence, sub_id, seen)
+                obx_data.extend(nested_obx)
+
+        return obx_data, sub_id
+
+    if 'ContentSequence' in ds:
+        obx_img_refs, _ = walk_content_sequence(ds.ContentSequence, sub_id_start=2)
+        obx_segments.extend(obx_img_refs)
+
+    # Format into HL7 OBX segments with Set ID (OBX-1)
+    formatted = []
+    for i, obx in enumerate(obx_segments):
+        obx_type, identifier, sub_id, value = obx
+        formatted.append(f'OBX|{i + 1}|HD|{identifier}|{sub_id}|{value}||||||F')
+
+    segments = '\n'.join(formatted)
+
+    return segments
+
 def create_hl7_message(data):
+    """
+    Create a complete HL7 message from input data.
+
+    Args:
+        data (dict or pydicom.dataset.FileDataset): Input data source.
+
+    Returns:
+        str: Complete HL7 message string.
+    """
     hl7_list = []
 
     hl7_list.append(create_hl7_msh_segment(data))
     hl7_list.append(create_hl7_pid_segment(data))
     hl7_list.append(create_obr_segment(data))
     hl7_list.append(create_zds_segment(data))
-    hl7_list.append(create_obx_segments(data))
+    hl7_list.append(generate_sr_obx_UID_segments(data))
+    hl7_list.append(create_obx_report_segments(data))
 
     hl7_message = '\n'.join(hl7_list)
     return hl7_message
-
 
 
 if __name__ == "__main__":
@@ -317,62 +451,5 @@ if __name__ == "__main__":
             "date": "2025-05-12",
             "accession_number": "ACC20250512001",
             "modality": "MG",
-            "procedure_code": {
-                "code": "24606-6",
-                "system": "http://loinc.org",
-                "display": "Mammogram Diagnostic Report"
-            },
-            "study_instance_uid": "1.2.840.113619.2.55.3.604688351.100.100.10000000000000000000"
-        },
-        "findings": [
-            {
-                "type": "text",
-                "tag": "RESULTTAG",
-                "value": "Suspicious mass in right breast, upper outer quadrant."
-            },
-            {
-                "type": "text",
-                "tag": "RESULTTAG",
-                "value": "Left breast tissue appears normal."
-            },
-            {
-                "type": "text",
-                "tag": "RESULTTAG",
-                "value": "BI-RADS 4: Suspicious abnormality. Consider biopsy."
-            },
-            {
-                "type": "html",
-                "tag": "HTMLTAG",
-                "value": "<div><b>Impression:</b> Further evaluation recommended.</div>"
-            },
-            {
-                "type": "html",
-                "tag": "HTMLCRTAG",
-                "value": "<html><body><p>Image result:</p><img src='data:image/png;base64,iVBOR...=='></body></html>"
-            }
-        ]
-    }
-    print(create_hl7_message(json_data))
 
-    #print(create_hl7_pid_segment(json_data))
 
-    #print(create_obr_segment(json_data))
-    #print(create_zds_segment(json_data))
-    #print(create_obx_segments(json_data))
-
-    print()
-
-    ds = pydicom.dcmread('brayz_sr.dcm')
-    print(create_hl7_message(ds))
-    #print(create_obr_segment(ds))
-    #print(create_zds_segment(ds))
-    #print(create_obx_segments(ds))
-
-    print("\n")
-    ds = pydicom.dcmread('IM-0003-0022.dcm')
-    print(create_hl7_message(ds))
-    #print(create_obr_segment(ds))
-    #print(create_zds_segment(ds))
-    #print(create_obx_segments(ds))
-
-# IM-0003-0022.dcm

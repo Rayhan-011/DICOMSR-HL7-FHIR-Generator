@@ -99,14 +99,14 @@ def process_acquisition_context(image_item, output, level):
 def create_obx_segments(report):
     report_list = report.split('\n')
     obx_segments = []
-    i = 1  # OBX segment index starts at 1
+    i = 18  # OBX segment index starts at 18
 
     heading = ''
 
     for line in report_list:
         if line.strip() == '':
             if heading == 'Image Library':
-                obx_segments.append(f"OBX|{i}|ST|IMAGELIBRARY^^AIENGINE||DXm image||||||F")
+                obx_segments.append(f"OBX|{i}|TX|IMAGELIBRARY^^AIENGINE||DXm image||||||F")
                 i += 1
             continue
 
@@ -117,20 +117,19 @@ def create_obx_segments(report):
                 line1 = line.split('=', 1)[0].strip()
                 line2 = line.split('=', 1)[1].strip()
 
-                obx_segments.append(f"OBX|{i}|ST|TITLETAG^^AIENGINE||{line1}||||||F")
+                obx_segments.append(f"OBX|{i}|TX|TITLETAG^^AIENGINE||{line1}||||||F")
                 i += 1
-                obx_segments.append(f"OBX|{i}|ST|RESULTSTAG^^AIENGINE||{line2.lstrip(' ')}||||||F")
+                obx_segments.append(f"OBX|{i}|TX|RESULTSTAG^^AIENGINE||{line2.lstrip(' ')}||||||F")
 
                 heading = line
 
             else:
-                obx_segments.append(f"OBX|{i}|ST|TITLETAG^^AIENGINE||{line}||||||F")
+                obx_segments.append(f"OBX|{i}|TX|TITLETAG^^AIENGINE||{line}||||||F")
 
                 heading = line
 
-
         else:
-            obx_segments.append(f"OBX|{i}|ST|RESULTSTAG^^AIENGINE||{line}||||||F")
+            obx_segments.append(f"OBX|{i}|TX|RESULTSTAG^^AIENGINE||{line}||||||F")
         i += 1
     obx_segments = '\n'.join(obx_segments)
     return obx_segments
@@ -146,8 +145,10 @@ if __name__ == "__main__":
     # Example usage
     ds = pydicom.dcmread("IM-0003-0022.dcm", force=True)
     report = extract_sr_report(ds)
-    print(report)
-    print(type(report))
-    print()
+    #print(report)
+    #print(type(report))
+    #print()
     obx_srgments = create_obx_segments(report)
     print(obx_srgments)
+
+

@@ -3,6 +3,15 @@ import pydicom
 validation_dict = {}
 
 def extract_content_sequence_data(ds):
+    """
+    Extract and parse the ContentSequence from a DICOM SR dataset.
+
+    Args:
+        ds (pydicom.Dataset): The DICOM dataset.
+
+    Returns:
+        bool: True if extraction is successful, False otherwise.
+    """
     try:
         if not hasattr(ds, 'ContentSequence'):
             return False
@@ -16,6 +25,17 @@ def extract_content_sequence_data(ds):
         return False
 
 def parse_item(item, output, level):
+    """
+    Recursively parse an item in the ContentSequence to extract structured data.
+
+    Args:
+        item (pydicom.Dataset): The current item in the ContentSequence.
+        output (list): List to accumulate parsed strings.
+        level (int): Current indentation level for nested items.
+
+    Returns:
+        None
+    """
     indent = "  " * level
 
     # Get concept name if exists
@@ -61,6 +81,17 @@ def parse_item(item, output, level):
             parse_item(sub_item, output, level + 1)
 
 def process_acquisition_context(image_item, output, level):
+    """
+    Process acquisition context items within an image item in the ContentSequence.
+
+    Args:
+        image_item (pydicom.Dataset): The image item containing acquisition context.
+        output (list): List to accumulate parsed strings.
+        level (int): Current indentation level.
+
+    Returns:
+        None
+    """
     indent = "  " * level
     if not hasattr(image_item, "ContentSequence"):
         return
@@ -99,7 +130,15 @@ def process_acquisition_context(image_item, output, level):
             output.append(f"{indent}Acquisition Context: {name} = {value}")
 
 def validate_SR(ds):
+    """
+    Validate key attributes and structure of a DICOM SR dataset.
 
+    Args:
+        ds (pydicom.Dataset): The DICOM dataset.
+
+    Returns:
+        None. Prints validation results and updates global validation_dict.
+    """
     global validation_dict
 
     # Extract SOP Class UID
@@ -209,7 +248,7 @@ def validate_SR(ds):
 
 
 if __name__ == "__main__":
-    path_to_dcm_file = 'E:\\WORK\\MachineLearning\\Python\\DICOMSRtoHL7_FHIR\\v2\\IM-0003-0022.dcm'  # Replace with your DICOM file path
+    path_to_dcm_file = 'IM-0003-0022.dcm'  # Replace with your DICOM file path
     ds = pydicom.dcmread(path_to_dcm_file)
 
     print("Validating SR FILE tags and structured data...")
@@ -223,5 +262,7 @@ if __name__ == "__main__":
             print(f"✅ {key} exits.")
         else:
             print(f"❌ {key} is invalid or missing.")
+
+
 
 
