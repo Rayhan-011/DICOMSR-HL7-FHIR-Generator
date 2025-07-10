@@ -1,4 +1,5 @@
 import pydicom
+import re
 
 
 def extract_sr_report(ds):
@@ -96,17 +97,46 @@ def process_acquisition_context(image_item, output, level):
             output.append(f"{indent}Acquisition Context: {name} = {value}")
 
 
+def find_alert_code(text):
+    # First, search for any single-digit numbers (0-9)
+    single_digit_match = re.search(r'\b\d\b', text)
+    if single_digit_match:
+        return int(single_digit_match.group())
+
+    # If no single-digit found, search for 2-digit numbers (10-99)
+    two_digit_match = re.search(r'\b\d{2}\b', text)
+    if two_digit_match:
+        return int(two_digit_match.group())
+
+    # If neither found, return None or a default value
+    return None
+
 def create_obx_segments(report):
     report_list = report.split('\n')
     obx_segments = []
     i = 18  # OBX segment index starts at 18
 
     heading = ''
+    
+    # Get the alert code
+    for line in report_list:
+        leading_spaces = len(line) - len(line.lstrip(' '))
+        if leading_spaces == 0:  # heading
+            if '=' in line:
+                heading = line
+
+        if 'Assesment Category' in line and 'CAD Processing and Findings Summary' in heading:
+            i += 1
+            alert_code = find_alert_code(line)
+            obx_segments.append(f'OBX|{i}|TX|55110-1^Radiology Report^LN||{alert_code}|')
+            break
+
+    heading = ''
 
     for line in report_list:
         if line.strip() == '':
             if heading == 'Image Library':
-                obx_segments.append(f"OBX|{i}|TX|IMAGELIBRARY^^AIENGINE||DXm image||||||F")
+                obx_segments.append(f"OBX|{i}|TX|18748-4^Radiology Report^LN||DXm image||||||F")
                 i += 1
             continue
 
@@ -117,19 +147,19 @@ def create_obx_segments(report):
                 line1 = line.split('=', 1)[0].strip()
                 line2 = line.split('=', 1)[1].strip()
 
-                obx_segments.append(f"OBX|{i}|TX|TITLETAG^^AIENGINE||{line1}||||||F")
+                obx_segments.append(f"OBX|{i}|TX|18748-4^Radiology Report^LN||{line1}||||||F")
                 i += 1
-                obx_segments.append(f"OBX|{i}|TX|RESULTSTAG^^AIENGINE||{line2.lstrip(' ')}||||||F")
+                obx_segments.append(f"OBX|{i}|TX|18748-4^Radiology Report^LN||{line2.lstrip(' ')}||||||F")
 
                 heading = line
 
             else:
-                obx_segments.append(f"OBX|{i}|TX|TITLETAG^^AIENGINE||{line}||||||F")
+                obx_segments.append(f"OBX|{i}|TX|18748-4^SR Text^LN||{line}||||||F")
 
                 heading = line
 
         else:
-            obx_segments.append(f"OBX|{i}|TX|RESULTSTAG^^AIENGINE||{line}||||||F")
+            obx_segments.append(f"OBX|{i}|TX|18748-4^Radiology Report^LN||{line}||||||F")
         i += 1
     obx_segments = '\n'.join(obx_segments)
     return obx_segments
